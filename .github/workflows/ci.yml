@@ -1,0 +1,42 @@
+name: CI
+
+# Verifies Boopa compiles on every push / PR. No signing, no secrets.
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Set up mise (installs Tuist from .mise.toml)
+        uses: jdx/mise-action@v2
+
+      - name: Generate Xcode project
+        run: |
+          mise x -- tuist install
+          mise x -- tuist generate --no-open
+
+      - name: Build (Debug, unsigned)
+        run: |
+          xcodebuild \
+            -workspace Boopa.xcworkspace \
+            -scheme Boopa \
+            -configuration Debug \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            build

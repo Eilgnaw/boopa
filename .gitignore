@@ -1,0 +1,24 @@
+# Xcode
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+
+# Tuist
+Derived/
+Tuist/.build/
+.build/
+
+# Build
+DerivedData/
+build/
+
+# Local config (contains DEVELOPMENT_TEAM etc.)
+.mise.local.toml
+
+# Local-only agent guidance, not for the public repo
+CLAUDE.md
+
+# macOS
+.DS_Store
+*.swp
+*~
