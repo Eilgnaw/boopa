@@ -1,128 +1,62 @@
-name: Release
+name: Release DMG
 
-# Builds Boopa, signs it with a Developer ID certificate, notarizes & staples it
-# with Apple, publishes a GitHub Release with the zipped .app, and bumps the
-# Homebrew cask so `brew install --cask` stays current.
+# Signing uses a cloud-managed Developer ID cert, which can't run in CI — so you
+# sign + notarize Boopa.app locally (Xcode → Distribute App → Direct Distribution).
+# This workflow only takes that notarized .app, wraps it in a drag-to-Applications
+# DMG, notarizes & staples the DMG with an App Store Connect API key, attaches it to
+# the release, and bumps the Homebrew cask.
 #
-# Trigger: push a version tag, e.g.  git tag v1.0.0 && git push origin v1.0.0
-# (or run manually via "Run workflow" and pass the tag).
+# How to release:
+#   1. Notarize Boopa.app locally (Xcode Direct Distribution).
+#   2. Zip it:   ditto -c -k --keepParent Boopa.app Boopa.app.zip
+#   3. Create a GitHub Release on tag vX.Y.Z and upload Boopa.app.zip as an asset.
+#      Publishing the release runs this workflow, which adds Boopa-X.Y.Z.dmg to it.
+#   (Re-run manually via "Run workflow" with an existing tag if needed.)
 #
-# ──────────────────────────────────────────────────────────────────────────
-# Required repository secrets (Settings → Secrets and variables → Actions):
-#
-#   MACOS_CERTIFICATE_P12_BASE64  Developer ID Application cert + key, exported
-#                                 from Keychain as .p12, then `base64 -i cert.p12`.
-#   MACOS_CERTIFICATE_PASSWORD    Password you set when exporting the .p12.
-#   KEYCHAIN_PASSWORD             Any string; password for the temp CI keychain.
-#
-#   AC_API_KEY_ID                 App Store Connect API key ID (e.g. ABC123XYZ).
-#   AC_API_ISSUER_ID              App Store Connect issuer ID (UUID).
-#   AC_API_KEY_P8_BASE64          The AuthKey_XXXX.p8, `base64 -i AuthKey.p8`.
-#
-# Optional:
-#   MACOS_SIGN_IDENTITY           Exact identity name if you have several certs,
-#                                 e.g. "Developer ID Application: Name (TEAMID)".
-#                                 Defaults to "Developer ID Application".
-#
-# Create the App Store Connect API key at:
-#   https://appstoreconnect.apple.com/access/integrations/api  (role: Developer)
-# ──────────────────────────────────────────────────────────────────────────
+# Required secrets (Settings → Secrets and variables → Actions):
+#   AC_API_KEY_ID          App Store Connect API key ID (e.g. FL96YHNTNR).
+#   AC_API_ISSUER_ID       Issuer ID (UUID).
+#   AC_API_KEY_P8_BASE64   The AuthKey_XXXX.p8, `base64 -i AuthKey.p8 | pbcopy`.
 
 on:
-  push:
-    tags: ["v*"]
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Version tag to build (e.g. v1.0.0)"
+        description: "Existing release tag that has Boopa.app.zip attached (e.g. v1.0.0)"
         required: true
 
 permissions:
-  contents: write # create the release + commit the cask bump
+  contents: write # upload the DMG + commit the cask bump
 
 jobs:
-  release:
+  dmg:
     runs-on: macos-15
+    timeout-minutes: 30 # notarization is usually < 5 min; bail out if something hangs
     steps:
       - uses: actions/checkout@v4
 
-      - name: Resolve version
+      - name: Resolve tag / version
         id: ver
         run: |
-          REF="${{ github.event.inputs.tag || github.ref_name }}"
-          echo "tag=$REF" >> "$GITHUB_OUTPUT"
-          echo "version=${REF#v}" >> "$GITHUB_OUTPUT"
+          TAG="${{ github.event.inputs.tag || github.event.release.tag_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Select Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
-
-      - name: Set up mise (installs Tuist from .mise.toml)
-        uses: jdx/mise-action@v2
-
-      - name: Generate Xcode project
-        run: |
-          mise x -- tuist install
-          mise x -- tuist generate --no-open
-
-      - name: Build (unsigned)
-        run: |
-          xcodebuild \
-            -workspace Boopa.xcworkspace \
-            -scheme Boopa \
-            -configuration Release \
-            -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO \
-            build
-          echo "APP=$PWD/build/Build/Products/Release/Boopa.app" >> "$GITHUB_ENV"
-
-      - name: Import Developer ID certificate
+      - name: Download the notarized app from the release
         env:
-          CERT_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
-          CERT_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
-          echo "$CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          security import "$RUNNER_TEMP/cert.p12" -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
-          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          rm -f "$RUNNER_TEMP/cert.p12"
+          gh release download "${{ steps.ver.outputs.tag }}" \
+            --repo "$GITHUB_REPOSITORY" --pattern "Boopa.app.zip" --dir .
+          ditto -x -k Boopa.app.zip .
+          test -d Boopa.app
 
-      - name: Codesign (hardened runtime, secure timestamp)
-        env:
-          SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+      - name: Verify the app is signed & notarized
         run: |
-          IDENTITY="${SIGN_IDENTITY:-Developer ID Application}"
-          # Sign nested code first (no-op for our statically linked build), then the app.
-          if [ -d "$APP/Contents/Frameworks" ]; then
-            find "$APP/Contents/Frameworks" -type f -perm +111 -print0 | while IFS= read -r -d '' f; do
-              codesign --force --options runtime --timestamp --sign "$IDENTITY" "$f"
-            done
-          fi
-          codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
-          codesign --verify --deep --strict --verbose=2 "$APP"
-
-      - name: Notarize & staple
-        env:
-          AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}
-          AC_API_ISSUER_ID: ${{ secrets.AC_API_ISSUER_ID }}
-          AC_API_KEY_P8_BASE64: ${{ secrets.AC_API_KEY_P8_BASE64 }}
-        run: |
-          echo "$AC_API_KEY_P8_BASE64" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
-          ditto -c -k --keepParent "$APP" "$RUNNER_TEMP/notarize.zip"
-          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
-            --key "$RUNNER_TEMP/AuthKey.p8" \
-            --key-id "$AC_API_KEY_ID" \
-            --issuer "$AC_API_ISSUER_ID" \
-            --wait
-          xcrun stapler staple "$APP"
-          spctl --assess --type execute --verbose=2 "$APP"
-          rm -f "$RUNNER_TEMP/AuthKey.p8"
+          spctl --assess --type execute --verbose=2 Boopa.app
+          xcrun stapler validate Boopa.app
 
       - name: Build, notarize & staple the DMG
         id: package
@@ -133,9 +67,9 @@ jobs:
         run: |
           DMG="Boopa-${{ steps.ver.outputs.version }}.dmg"
           chmod +x scripts/make-dmg.sh
-          # On a headless runner the Finder layout is skipped; the DMG is still a
+          # Headless runner: the Finder layout is skipped, but the DMG is still a
           # working drag-to-Applications image.
-          scripts/make-dmg.sh "$APP" "$DMG"
+          scripts/make-dmg.sh "$PWD/Boopa.app" "$DMG"
           echo "$AC_API_KEY_P8_BASE64" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
           xcrun notarytool submit "$DMG" \
             --key "$RUNNER_TEMP/AuthKey.p8" \
@@ -147,12 +81,12 @@ jobs:
           echo "dmg=$DMG" >> "$GITHUB_OUTPUT"
           echo "sha256=$(shasum -a 256 "$DMG" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
-      - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.ver.outputs.tag }}
-          files: ${{ steps.package.outputs.dmg }}
-          generate_release_notes: true
+      - name: Attach DMG to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ steps.ver.outputs.tag }}" \
+            "${{ steps.package.outputs.dmg }}" --repo "$GITHUB_REPOSITORY" --clobber
 
       - name: Bump Homebrew cask on main
         run: |

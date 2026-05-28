@@ -148,4 +148,6 @@ make generate   # 改完 Project.swift 后重新生成
 make clean      # 清理 Tuist 产物
 ```
 
-架构说明与发布/公证流程见 [`CLAUDE.md`](CLAUDE.md)。
+## 友链
+
+- **[Linux.do](https://linux.do)** — 学 AI，上 L 站

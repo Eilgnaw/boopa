@@ -155,4 +155,6 @@ make generate   # regenerate after editing Project.swift
 make clean      # clean Tuist artifacts
 ```
 
-See [`CLAUDE.md`](CLAUDE.md) for architecture and the release/notarization pipeline.
+## Links
+
+- **[Linux.do](https://linux.do)**
