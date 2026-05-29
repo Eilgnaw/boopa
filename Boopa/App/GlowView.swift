@@ -1,15 +1,25 @@
 import SwiftUI
 
+/// Notch (camera-housing) geometry for one screen, expressed in that overlay's
+/// local points with a top-left origin. `nil` for screens without a notch —
+/// e.g. most external displays. Computed per screen in `GlowController`.
+struct NotchGeometry: Equatable {
+    var height: CGFloat   // notch depth from the physical top edge
+    var leftX: CGFloat    // x where the notch begins
+    var rightX: CGFloat   // x where the notch ends
+}
+
 /// The animated edge glow rendered inside each overlay window.
 struct GlowView: View {
     let style: Theme
+    let notch: NotchGeometry?
 
     var body: some View {
         Group {
             if style.animationKind == .comet {
-                CometBorder(style: style)
+                CometBorder(style: style, notch: notch)
             } else {
-                EdgeGlow(style: style)
+                EdgeGlow(style: style, notch: notch)
                     .modifier(PulseModifier(style: style))
             }
         }
@@ -20,48 +30,102 @@ struct GlowView: View {
 
 // MARK: - Edge bands
 
-/// Four directional gradients fading from the edge toward the center; the middle stays transparent.
+/// Directional gradients fading from each edge toward the center; the middle stays
+/// transparent. The top edge wraps around the notch when one is present, so the glow
+/// hugs the screen's usable contour instead of hiding behind the camera housing.
 private struct EdgeGlow: View {
     let style: Theme
+    let notch: NotchGeometry?
 
     private var color: Color { Color(boopaHex: style.color) }
     private var depth: CGFloat { CGFloat(style.thickness + style.blur) }
     private var edges: Set<GlowEdge> { style.edgeSet }
 
     var body: some View {
-        ZStack {
-            if edges.contains(.top) { band(.top) }
-            if edges.contains(.bottom) { band(.bottom) }
-            if edges.contains(.left) { band(.left) }
-            if edges.contains(.right) { band(.right) }
+        Canvas { ctx, size in
+            let w = size.width, h = size.height
+            let d = min(depth, min(w, h) / 2)
+
+            if edges.contains(.bottom) {
+                fill(ctx, CGRect(x: 0, y: h - d, width: w, height: d),
+                     from: CGPoint(x: 0, y: h), to: CGPoint(x: 0, y: h - d))
+            }
+            if edges.contains(.left) {
+                fill(ctx, CGRect(x: 0, y: 0, width: d, height: h),
+                     from: CGPoint(x: 0, y: 0), to: CGPoint(x: d, y: 0))
+            }
+            if edges.contains(.right) {
+                fill(ctx, CGRect(x: w - d, y: 0, width: d, height: h),
+                     from: CGPoint(x: w, y: 0), to: CGPoint(x: w - d, y: 0))
+            }
+            if edges.contains(.top) {
+                drawTop(ctx, width: w, depth: d)
+            }
         }
         .compositingGroup()
         .blur(radius: CGFloat(style.blur) * 0.3)
         .ignoresSafeArea()
     }
 
-    @ViewBuilder
-    private func band(_ edge: GlowEdge) -> some View {
-        let gradient = LinearGradient(
-            stops: [
-                .init(color: color.opacity(style.intensity), location: 0),
-                .init(color: color.opacity(0), location: 1),
-            ],
-            startPoint: edge.gradientStart,
-            endPoint: edge.gradientEnd
-        )
-        switch edge {
-        case .top:
-            gradient.frame(height: depth).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        case .bottom:
-            gradient.frame(height: depth).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        case .left:
-            gradient.frame(width: depth).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        case .right:
-            gradient.frame(width: depth).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-        case .all:
-            EmptyView()
+    /// Straight band when there's no notch; otherwise a rounded contour that dips
+    /// around the notch, glowing on the screen-content side with every corner rounded.
+    private func drawTop(_ ctx: GraphicsContext, width w: CGFloat, depth d: CGFloat) {
+        guard let notch, notch.rightX > notch.leftX, notch.height > 0 else {
+            fill(ctx, CGRect(x: 0, y: 0, width: w, height: d),
+                 from: CGPoint(x: 0, y: 0), to: CGPoint(x: 0, y: d))
+            return
         }
+        let nL = notch.leftX, nR = notch.rightX, nH = notch.height
+        let r = min(8, (nR - nL) / 2, nH / 2)   // corner radius around the notch
+
+        // The usable top contour: across to the notch, down its left wall, across the
+        // floor, up the right wall, then on to the far corner — with rounded turns.
+        var contour = Path()
+        contour.move(to: CGPoint(x: 0, y: 0))
+        contour.addLine(to: CGPoint(x: nL - r, y: 0))
+        contour.addQuadCurve(to: CGPoint(x: nL, y: r), control: CGPoint(x: nL, y: 0))
+        contour.addLine(to: CGPoint(x: nL, y: nH - r))
+        contour.addQuadCurve(to: CGPoint(x: nL + r, y: nH), control: CGPoint(x: nL, y: nH))
+        contour.addLine(to: CGPoint(x: nR - r, y: nH))
+        contour.addQuadCurve(to: CGPoint(x: nR, y: nH - r), control: CGPoint(x: nR, y: nH))
+        contour.addLine(to: CGPoint(x: nR, y: r))
+        contour.addQuadCurve(to: CGPoint(x: nR + r, y: 0), control: CGPoint(x: nR, y: 0))
+        contour.addLine(to: CGPoint(x: w, y: 0))
+
+        // The notch opening (rounded bottom corners), extended above the top edge.
+        // Clip it OUT so the centered stroke only paints on the content side.
+        var hole = Path()
+        hole.move(to: CGPoint(x: nL, y: -d))
+        hole.addLine(to: CGPoint(x: nL, y: nH - r))
+        hole.addQuadCurve(to: CGPoint(x: nL + r, y: nH), control: CGPoint(x: nL, y: nH))
+        hole.addLine(to: CGPoint(x: nR - r, y: nH))
+        hole.addQuadCurve(to: CGPoint(x: nR, y: nH - r), control: CGPoint(x: nR, y: nH))
+        hole.addLine(to: CGPoint(x: nR, y: -d))
+        hole.closeSubpath()
+
+        var c = ctx
+        c.clip(to: hole, options: .inverse)
+
+        // Soft inner glow: stack centered strokes from wide+faint to narrow+bright.
+        // Half of each stroke is clipped away, leaving a one-sided fade ~`d` deep that
+        // follows the rounded contour smoothly through every corner.
+        let steps = 28
+        let minW = max(2, CGFloat(style.thickness))
+        let aLayer = 1 - pow(1 - style.intensity, 1 / Double(steps))
+        for i in 0..<steps {
+            let f = Double(i) / Double(steps - 1)         // 0 (outer) → 1 (inner)
+            let width = minW + (2 * d - minW) * (1 - CGFloat(f))
+            c.stroke(contour, with: .color(color.opacity(aLayer)),
+                     style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round))
+        }
+    }
+
+    private func fill(_ ctx: GraphicsContext, _ rect: CGRect, from: CGPoint, to: CGPoint) {
+        let gradient = Gradient(stops: [
+            .init(color: color.opacity(style.intensity), location: 0),
+            .init(color: color.opacity(0), location: 1),
+        ])
+        ctx.fill(Path(rect), with: .linearGradient(gradient, startPoint: from, endPoint: to))
     }
 }
 
@@ -105,6 +169,7 @@ private struct PulseModifier: ViewModifier {
 
 private struct CometBorder: View {
     let style: Theme
+    let notch: NotchGeometry?
 
     private var color: Color { Color(boopaHex: style.color) }
     private var period: Double { max(1.2, 4.0 / max(0.1, style.speed)) }
@@ -113,8 +178,8 @@ private struct CometBorder: View {
     private let segmentCount = 20
 
     var body: some View {
-        // Drive the comet head along the rounded-rect perimeter at constant arc-length
-        // speed (so it turns the rounded corners smoothly, with no gaps).
+        // Drive the comet head along the perimeter at constant arc-length speed (so it
+        // turns the rounded corners — and the notch — smoothly, with no gaps).
         TimelineView(.animation) { timeline in
             Canvas { ctx, size in
                 let elapsed = timeline.date.timeIntervalSinceReferenceDate
@@ -126,7 +191,7 @@ private struct CometBorder: View {
                     width: max(0, size.width - 2 * inset),
                     height: max(0, size.height - 2 * inset)
                 )
-                let path = Path(roundedRect: rect, cornerRadius: radius)
+                let path = borderPath(rect: rect, radius: radius, inset: inset)
                 let stroke = StrokeStyle(lineWidth: lineWidth, lineCap: .round)
 
                 // A bright head with a fading tail, drawn as overlapping arc segments.
@@ -142,6 +207,41 @@ private struct CometBorder: View {
             .blur(radius: CGFloat(style.blur) * 0.3)
         }
         .ignoresSafeArea()
+    }
+
+    /// The closed loop the comet travels: a rounded rect, with a notch carved into
+    /// the top edge when one is present so the light wraps around the camera housing.
+    private func borderPath(rect: CGRect, radius r: CGFloat, inset: CGFloat) -> Path {
+        guard let notch, notch.rightX > notch.leftX, notch.height > 0 else {
+            return Path(roundedRect: rect, cornerRadius: r)
+        }
+        let nL = notch.leftX, nR = notch.rightX
+        let nB = inset + notch.height                       // notch floor (y)
+        let nr = min(8, (nR - nL) / 2, notch.height / 2)    // small radius at notch corners
+
+        var p = Path()
+        p.move(to: CGPoint(x: rect.minX + r, y: rect.minY))
+        // top edge → into the notch
+        p.addLine(to: CGPoint(x: nL - nr, y: rect.minY))
+        p.addQuadCurve(to: CGPoint(x: nL, y: rect.minY + nr), control: CGPoint(x: nL, y: rect.minY))
+        p.addLine(to: CGPoint(x: nL, y: nB - nr))
+        p.addQuadCurve(to: CGPoint(x: nL + nr, y: nB), control: CGPoint(x: nL, y: nB))
+        // across the notch floor → back up
+        p.addLine(to: CGPoint(x: nR - nr, y: nB))
+        p.addQuadCurve(to: CGPoint(x: nR, y: nB - nr), control: CGPoint(x: nR, y: nB))
+        p.addLine(to: CGPoint(x: nR, y: rect.minY + nr))
+        p.addQuadCurve(to: CGPoint(x: nR + nr, y: rect.minY), control: CGPoint(x: nR, y: rect.minY))
+        // remaining top edge → top-right corner → around
+        p.addLine(to: CGPoint(x: rect.maxX - r, y: rect.minY))
+        p.addQuadCurve(to: CGPoint(x: rect.maxX, y: rect.minY + r), control: CGPoint(x: rect.maxX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - r))
+        p.addQuadCurve(to: CGPoint(x: rect.maxX - r, y: rect.maxY), control: CGPoint(x: rect.maxX, y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.minX + r, y: rect.maxY))
+        p.addQuadCurve(to: CGPoint(x: rect.minX, y: rect.maxY - r), control: CGPoint(x: rect.minX, y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.minX, y: rect.minY + r))
+        p.addQuadCurve(to: CGPoint(x: rect.minX + r, y: rect.minY), control: CGPoint(x: rect.minX, y: rect.minY))
+        p.closeSubpath()
+        return p
     }
 
     /// Stroke a fraction [from, to] of the closed path, wrapping across the 0/1 seam.
@@ -160,28 +260,6 @@ private struct CometBorder: View {
 }
 
 // MARK: - Helpers
-
-private extension GlowEdge {
-    var gradientStart: UnitPoint {
-        switch self {
-        case .top: return .top
-        case .bottom: return .bottom
-        case .left: return .leading
-        case .right: return .trailing
-        case .all: return .center
-        }
-    }
-
-    var gradientEnd: UnitPoint {
-        switch self {
-        case .top: return .bottom
-        case .bottom: return .top
-        case .left: return .trailing
-        case .right: return .leading
-        case .all: return .center
-        }
-    }
-}
 
 extension Color {
     /// Parse `#RRGGBB`, `#RRGGBBAA`, or a small set of color names. Falls back to red.

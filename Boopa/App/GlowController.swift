@@ -72,7 +72,10 @@ final class GlowController {
         windows.forEach { $0.orderOut(nil) }
         windows = NSScreen.screens.map { screen in
             let window = OverlayWindow(screen: screen)
-            let host = NSHostingView(rootView: GlowView(style: style))
+            let host = NSHostingView(rootView: GlowView(style: style, notch: NotchGeometry.from(screen)))
+            // Ignore the safe area so the glow reaches the physical top edge beside
+            // the notch instead of being pushed below it.
+            host.safeAreaRegions = []
             host.frame = CGRect(origin: .zero, size: screen.frame.size)
             host.autoresizingMask = [.width, .height]
             window.contentView = host
@@ -90,5 +93,21 @@ final class GlowController {
         clearTimer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak self] _ in
             Task { @MainActor in self?.clear() }
         }
+    }
+}
+
+extension NotchGeometry {
+    /// Notch geometry for `screen` in overlay-local points (top-left origin), or
+    /// `nil` when the screen has no notch — e.g. most external displays.
+    static func from(_ screen: NSScreen) -> NotchGeometry? {
+        let height = screen.safeAreaInsets.top
+        guard height > 0 else { return nil }
+        let width = screen.frame.width
+        if let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
+            return NotchGeometry(height: height, leftX: left.width, rightX: width - right.width)
+        }
+        // Fallback: assume a centered notch of a typical width.
+        let notchWidth: CGFloat = 200
+        return NotchGeometry(height: height, leftX: (width - notchWidth) / 2, rightX: (width + notchWidth) / 2)
     }
 }
