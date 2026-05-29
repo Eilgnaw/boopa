@@ -8,8 +8,8 @@
 # Or directly from this repo:
 #   brew install --cask https://raw.githubusercontent.com/Eilgnaw/boopa/main/Casks/boopa.rb
 cask "boopa" do
-  version "1.0.0"
-  sha256 "0ace75c93241e56bf40cab8e11254213d918e16f210898e0728358ae1ffa101d"
+  version "1.0.1"
+  sha256 "3726085728c6affe0cdc4695cd59923c17e7cdeceba17632885cc1d6f30dfff4"
 
   url "https://github.com/Eilgnaw/boopa/releases/download/v#{version}/Boopa-#{version}.dmg"
   name "Boopa"
