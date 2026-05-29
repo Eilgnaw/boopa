@@ -3,6 +3,7 @@ import ServiceManagement
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let glow = GlowController()
+    private let trafficLight = TrafficLightController()
     private var ipc: IPCListener?
     private var focus: FocusMonitor?
     private var statusItem: NSStatusItem?
@@ -13,7 +14,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         BoopaConfig.writeSampleConfigIfMissing()
         setUpStatusItem()
 
-        focus = FocusMonitor { [weak self] in self?.glow.clearForFocusChange() }
+        focus = FocusMonitor { [weak self] in
+            self?.glow.clearForFocusChange()
+            self?.trafficLight.clearForFocusChange()
+        }
         focus?.clearOnFocus = Set(config.clearOnFocus)
 
         ipc = IPCListener { [weak self] command in self?.handle(command) }
@@ -29,7 +33,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch command.action {
         case .clear:
             glow.clear()
+            trafficLight.clear()
         case .show:
+            // Traffic-light beacon takes precedence when the command carries a spec.
+            if let traffic = command.traffic {
+                var spec = traffic
+                // Mirror the glow's courtesy: if the user is already looking at a
+                // clear_on_focus app, downgrade a persistent beacon to a brief flash.
+                if spec.modeKind == .persistent,
+                   let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+                   config.clearOnFocus.contains(front) {
+                    spec.mode = GlowMode.oneshot.rawValue
+                }
+                trafficLight.show(spec: spec, autoClearSeconds: config.autoClearSeconds, duration: command.duration)
+                updateDismissItem()
+                return
+            }
             guard var style = command.style else { return }
             // If the user is already looking at a clear_on_focus app (e.g. their terminal),
             // a persistent beacon would just nag — downgrade it to a brief one-shot flash
@@ -71,6 +90,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         test.target = self
         menu.addItem(test)
 
+        let testLight = NSMenuItem(title: String(localized: "Test Traffic Light"), action: #selector(testTrafficLight), keyEquivalent: "")
+        testLight.target = self
+        menu.addItem(testLight)
+
         menu.addItem(.separator())
 
         let focusItem = NSMenuItem(title: String(localized: "Clear on Focus…"), action: #selector(openFocusSettings), keyEquivalent: "")
@@ -94,17 +117,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return menu
     }
 
+    private var beaconShowing: Bool { glow.isShowing || trafficLight.isShowing }
+
     private func updateDismissItem() {
         guard let item = statusItem?.menu?.item(withIdentifier: .dismiss) else { return }
-        item.isEnabled = glow.isShowing
+        item.isEnabled = beaconShowing
     }
 
-    @objc private func dismissGlow() { glow.clear() }
+    @objc private func dismissGlow() {
+        glow.clear()
+        trafficLight.clear()
+    }
 
     @objc private func testGlow() {
         config = BoopaConfig.load()
         let theme = config.theme(named: nil).with(mode: .oneshot)
         glow.show(style: theme, autoClearSeconds: config.autoClearSeconds, duration: nil)
+    }
+
+    @objc private func testTrafficLight() {
+        config = BoopaConfig.load()
+        trafficLight.show(spec: TrafficSpec(lit: ["green"], mode: GlowMode.oneshot.rawValue),
+                          autoClearSeconds: config.autoClearSeconds, duration: 3)
     }
 
     @objc private func quit() { NSApp.terminate(nil) }
@@ -138,7 +172,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 extension AppDelegate: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
-        menu.item(withIdentifier: .dismiss)?.isEnabled = glow.isShowing
+        menu.item(withIdentifier: .dismiss)?.isEnabled = beaconShowing
         menu.item(withIdentifier: .launchAtLogin)?.state =
             (SMAppService.mainApp.status == .enabled) ? .on : .off
     }

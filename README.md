@@ -11,12 +11,22 @@ itself.
 It runs as a tiny menu-bar app (no Dock icon) with a matching command-line tool baked
 into the same binary.
 
+## Screenshots
+
+| Screen-edge glow | Notch traffic light |
+| :---: | :---: |
+| ![Screen-edge glow mode](docs/images/glow.png) | ![Notch traffic-light mode](docs/images/traffic-light.png) |
+
 ## Features
 
 - **Screen-edge glow** on every display — a transparent, click-through overlay that
   paints only the edges, so it never blocks what's underneath.
-- **Two modes**: a one-shot `flash` that fades out, and a persistent `attention` beacon
-  that stays until dismissed.
+- **Two glow modes**: a one-shot `flash` that fades out, and a persistent `attention`
+  beacon that stays until dismissed.
+- **Traffic-light beacon**: `boopa light <red|yellow|green …>` slides a horizontal
+  traffic light down out of the notch (or the screen's top-center when there's no notch).
+  A glanceable status signal — e.g. green = done, red = blocked, yellow = working — that
+  you pick the lit lamps for. Independent of the edge glow; the two never interfere.
 - **Clear on focus**: switching to your terminal/editor auto-dismisses the glow — you're
   already looking, so it stops nagging.
 - **Themes & animations**: `breathe`, `pulse`, `comet`, `blink`, `solid`; tune color,
@@ -70,6 +80,23 @@ boopa flash --animation comet --speed 2 --duration 4
 
 Style flags (override the chosen theme): `--theme --color --edges --thickness --blur
 --animation --speed --intensity --duration`.
+
+### Traffic-light beacon
+
+A horizontal red/yellow/green light that drops out of the notch; pass the lamps to light
+(default `red`). It stays until `boopa clear` unless you give it a duration.
+
+```bash
+boopa light green                     # all-clear / done
+boopa light red                       # blocked / needs you
+boopa light yellow                    # working / thinking
+boopa light red yellow                # light two lamps at once
+boopa light green --oneshot --duration 3   # fade out on its own
+boopa light red --size 220            # override the bar width (defaults to the notch)
+```
+
+Flags: `--size` (bar width in points; defaults to the notch width), `--duration`,
+`--oneshot`. Dismiss with `boopa clear` (same command that clears the glow).
 
 Management commands:
 

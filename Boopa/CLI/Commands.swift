@@ -7,12 +7,12 @@ struct BoopaCLI: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "boopa",
         abstract: "Flash a glowing ring around the screen edges to signal that an agent needs attention.",
-        subcommands: [Flash.self, Attention.self, Clear.self, Themes.self, Status.self, Install.self, Uninstall.self, Quit.self]
+        subcommands: [Flash.self, Attention.self, Light.self, Clear.self, Themes.self, Status.self, Install.self, Uninstall.self, Quit.self]
     )
 
     /// Subcommand names used by BoopaMain to decide CLI vs agent mode.
     static let knownSubcommands: Set<String> = [
-        "flash", "attention", "clear", "themes", "status", "install", "uninstall", "quit", "help",
+        "flash", "attention", "light", "clear", "themes", "status", "install", "uninstall", "quit", "help",
     ]
 }
 
@@ -91,6 +91,46 @@ struct Clear: ParsableCommand {
         if Agent.isRunning() {
             Agent.send(WireCommand(action: .clear, style: nil, duration: nil))
         }
+    }
+}
+
+// MARK: - Traffic-light command
+
+struct Light: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "light",
+        abstract: "Drop a traffic-light beacon from the notch; lit lamps signal status.",
+        discussion: """
+        Lamps are red, yellow, green. Pass the ones to light as arguments
+        (default: red). Examples:
+          boopa light green            # all-clear / done
+          boopa light red              # blocked / needs you
+          boopa light yellow           # thinking / in progress
+          boopa light red yellow       # light two at once
+        Stays up until `boopa clear` (or focusing a clear_on_focus app); use
+        --oneshot or --duration to fade it out on its own.
+        """
+    )
+
+    @Argument(help: "Lamps to light: red, yellow, green. Combine freely. Defaults to red.")
+    var colors: [String] = []
+
+    @Option(name: .long, help: "Bar width in points. Defaults to the notch width.")
+    var size: Double?
+
+    @Option(name: .long, help: "Duration in seconds before auto-clearing.")
+    var duration: Double?
+
+    @Flag(name: .long, help: "Fade out automatically instead of staying until cleared.")
+    var oneshot: Bool = false
+
+    func run() throws {
+        var spec = TrafficSpec()
+        let valid = colors.compactMap { TrafficColor(rawValue: $0.lowercased())?.rawValue }
+        if !valid.isEmpty { spec.lit = valid }
+        if let size { spec.size = size }
+        spec.mode = (oneshot ? GlowMode.oneshot : .persistent).rawValue
+        Agent.ensureRunningThenSend(WireCommand(action: .show, traffic: spec, duration: duration))
     }
 }
 

@@ -123,6 +123,44 @@ extension Theme {
     }
 }
 
+// MARK: - Traffic light
+
+/// One lamp of the traffic-light beacon. Rendered top-to-bottom in this order.
+enum TrafficColor: String, Codable, CaseIterable {
+    case red, yellow, green
+
+    /// Default lamp tint. Matches the system reds/ambers/greens used elsewhere.
+    var hex: String {
+        switch self {
+        case .red: return "#FF3B30"
+        case .yellow: return "#FFCC00"
+        case .green: return "#34C759"
+        }
+    }
+}
+
+/// Visual description of the traffic-light beacon that drops from the notch.
+/// Independent of `Theme` (the edge-glow) so the two features never interfere.
+struct TrafficSpec: Codable, Equatable {
+    /// Which lamps are lit. Everything else is rendered dimmed.
+    var lit: [String] = ["red"]
+    /// Bar width in points. `0` (the default) means "auto" — match the notch width.
+    var size: Double = 0
+    var mode: String = "persistent"
+
+    init() {}
+
+    init(lit: [String], size: Double = 0, mode: String = "persistent") {
+        self.lit = lit
+        self.size = size
+        self.mode = mode
+    }
+
+    /// The set of lamps that should glow, parsed safely from `lit`.
+    var litColors: Set<TrafficColor> { Set(lit.compactMap { TrafficColor(rawValue: $0.lowercased()) }) }
+    var modeKind: GlowMode { GlowMode(rawValue: mode.lowercased()) ?? .persistent }
+}
+
 // MARK: - Built-in themes
 
 extension Theme {
@@ -147,6 +185,9 @@ enum WireAction: String, Codable {
 struct WireCommand: Codable {
     var action: WireAction
     var style: Theme?
+    /// When present on a `.show`, render the traffic-light beacon instead of the
+    /// edge glow. `nil` keeps the original glow behavior. `.clear` dismisses both.
+    var traffic: TrafficSpec? = nil
     /// Optional explicit duration in seconds (overrides the computed oneshot length
     /// or sets a persistent fallback timeout for this command).
     var duration: Double?

@@ -38,9 +38,7 @@ note() {
   read -r -p "  回车继续… " _
 }
 
-
-
-run "Boopa 功能演示" clear
+echo; bold "Boopa 功能演示"
 dim "屏幕边缘光圈提醒。按回车一步步看,Ctrl-C 随时退出。"
 read -r -p "回车开始… " _
 
@@ -48,45 +46,39 @@ run "一次性脉冲(flash,默认主题)" flash
 run "持续光圈(attention,红色呼吸,亮到清除为止)" attention
 run "熄灭光圈(clear)" clear
 
-# run "换颜色:蓝色" flash --color blue
-# run "换颜色:十六进制 #FF9F0A(橙)" flash --color "#FF9F0A"
+run "换颜色:蓝色" flash --color blue
+run "换颜色:十六进制 #FF9F0A(橙)" flash --color "#FF9F0A"
 
+run "只亮顶部边缘" flash --color purple --edges top --duration 3
+run "只亮左右两条边" flash --color green --edges left right --duration 3
 
-
-run "聚焦自动熄灭" clear
-run "持续光圈会在你切到终端/编辑器时自动熄灭。(clear_on_focus 列表里的 app)" clear
-run  "也可在菜单栏 Boopa 图标 → 聚焦时自动熄灭… 里管理这些app。" clear
-run "触发持续光圈(然后切走再切回终端试试)" attention
-sleep 2
-say "切回终端,光圈自动熄灭了"
-
-# run "只亮顶部边缘" flash --color purple --edges top --duration 3
-# run "只亮左右两条边" flash --color green --edges left right --duration 3
-
-run "五种动画风格" \
+note "五种动画风格" \
   "breathe 呼吸 / pulse 脉冲 / comet 跑马灯 / blink 闪烁 / solid 常亮" \
   "下面每种来一下,各约 3 秒。"
-run "动画:呼吸" flash --animation breathe --color "#FF3B30" --duration 3
-run "动画:脉冲" flash --animation pulse   --color "#0A84FF" --duration 3
-run "动画:跑马灯(沿圆角边框跑)" flash --animation comet --color purple --duration 4
-run "动画:闪烁"   flash --animation blink   --color "#FFD60A" --duration 3
-run "动画:常亮"   flash --animation solid   --color "#34C759" --duration 3
+run "动画:breathe 呼吸" flash --animation breathe --color "#FF3B30" --duration 3
+run "动画:pulse 脉冲"   flash --animation pulse   --color "#0A84FF" --duration 3
+run "动画:comet 跑马灯(沿圆角边框跑)" flash --animation comet --color purple --duration 4
+run "动画:blink 闪烁"   flash --animation blink   --color "#FFD60A" --duration 3
+run "动画:solid 常亮"   flash --animation solid   --color "#34C759" --duration 3
 
 run "更粗、更柔、更亮" flash --color "#FF2D55" --thickness 18 --blur 50 --intensity 1 --duration 3
-run "跑马灯转快一点(speed 2)" flash --animation comet --color "#5E5CE6" --thickness 18 --blur 50  --speed 2 --duration 4
+run "跑马灯转快一点(speed 2)" flash --animation comet --color "#5E5CE6" --speed 2 --duration 4
 
-# run "列出配置里的主题(themes)" themes
-# run "用 success 主题(绿色脉冲一下)" flash --theme success
-# run "用 warn 主题(橙色)" flash --theme warn
+run "列出配置里的主题(themes)" themes
+run "用 success 主题(绿色脉冲一下)" flash --theme success
+run "用 warn 主题(橙色)" flash --theme warn
 
-# run "持续光圈 + 4 秒兜底超时" attention --duration 4
+run "持续光圈 + 4 秒兜底超时" attention --duration 4
 
+note "聚焦自动熄灭" \
+  "持续光圈会在你切到终端/编辑器(clear_on_focus 列表里的 app)时自动熄灭。" \
+  "试法:下一步触发 attention 后,切到别的 app(如浏览器),再切回你的终端 —— 光圈应自动消失。" \
+  "也可在菜单栏 Boopa 图标 → Clear on Focus… 里管理这些 app。"
+run "触发持续光圈(然后切走再切回终端试试)" attention
 
+run "查看 agent 状态与当前配置(status)" status
+run "收尾:熄灭" clear
 
-# run "查看 agent 状态与当前配置(status)" status
-# run "收尾:熄灭" clear
-
-run "演示结束" clear
-run "Boopa已开源至GitHub" clear
-# dim "菜单栏图标里还有:Test Glow / Dismiss / Launch at Login / 开源地址。"
-# dim "开源地址:https://github.com/Eilgnaw/boopa  (顺手点个 Star)"
+echo; rule; bold "演示结束"
+dim "菜单栏图标里还有:Test Glow / Dismiss / Launch at Login / 开源地址。"
+dim "开源地址:https://github.com/Eilgnaw/boopa  (顺手点个 Star)"
